@@ -1,0 +1,35 @@
+# Core CLI and configuration
+# click and typer versions are aligned to avoid compatibility issues, as Typer is built on top of Click.
+typer==0.12.5
+click==8.1.7 
+rich==13.9.4
+pydantic==2.10.4
+pydantic-settings==2.7.1
+python-dotenv==1.0.1
+
+# Logging
+loguru==0.7.3
+
+# HTTP and scraping stack planned for later parts
+httpx==0.28.1
+tenacity==9.0.0
+beautifulsoup4==4.12.3
+lxml==5.3.0
+markdownify==0.14.1
+playwright==1.49.1
+
+# PDF parsing planned for later parts
+pypdf==5.1.0
+
+# Graph database
+neo4j==5.27.0
+
+# Embeddings and vector operations planned for later parts
+numpy==2.2.1
+sentence-transformers==3.3.1
+
+# Optional OpenAI integration planned for topic extraction, embeddings, and synthesis
+openai==1.58.1
+
+# Testing
+pytest==8.3.4
