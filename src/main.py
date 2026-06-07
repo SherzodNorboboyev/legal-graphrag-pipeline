@@ -309,36 +309,49 @@ def merge_topics(
         help="Show merge plan without mutating the graph. Use --apply to mutate.",
     ),
 ) -> None:
-    """Merge duplicate Topic nodes by embedding similarity.
+    """Merge duplicate Topic nodes by embedding similarity."""
 
-    Part 1 stub:
-    Topic merging will be implemented in later parts.
-    """
+    from src.vector_ops.topic_merging import TopicMerger
 
     settings = get_settings()
     effective_threshold = threshold if threshold is not None else settings.topic_merge_similarity
 
-    logger.info("Merge-topics command invoked.")
-    logger.info("Threshold: {}", effective_threshold)
-    logger.info("Dry run: {}", dry_run)
+    try:
+        with TopicMerger(settings) as merger:
+            plan = merger.merge_duplicate_topics(
+                threshold=effective_threshold,
+                dry_run=dry_run,
+            )
 
-    console.print(
-        Panel(
-            "\n".join(
-                [
-                    "[bold yellow]Part 1 stub[/bold yellow]",
-                    "Topic merging is not implemented yet.",
-                    "",
-                    f"Similarity threshold: {effective_threshold}",
-                    f"Dry run: {dry_run}",
-                ]
-            ),
-            title="merge-topics",
-            border_style="yellow",
-        )
-    )
+        console.print(f"[green]Topic merge completed[/green]: {plan.summary()}")
+
+    except Exception as exc:
+        logger.exception("Topic merge failed: {}", exc)
+        raise typer.Exit(code=1) from exc
 
 
+@app.command("communities")
+def communities() -> None:
+    """Run Louvain community detection using Neo4j GDS if available."""
+
+    from src.vector_ops.topic_merging import TopicMerger
+
+    settings = get_settings()
+
+    try:
+        with TopicMerger(settings) as merger:
+            result = merger.run_louvain_community_detection()
+
+        if result.get("ok"):
+            console.print(f"[green]Community detection complete[/green]: {result}")
+        else:
+            console.print(f"[yellow]Community detection skipped/failed[/yellow]: {result}")
+
+    except Exception as exc:
+        logger.exception("Community detection failed: {}", exc)
+        raise typer.Exit(code=1) from exc
+    
+    
 @app.command("search")
 def search(
     query: str = typer.Argument(..., help="Natural-language legal research query."),

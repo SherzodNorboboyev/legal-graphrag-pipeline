@@ -95,6 +95,15 @@ TITLE_STOPWORDS = {
     "شأن",
     "رقم",
     "المادة",
+    "المرسوم",
+    "اللائحة",
+    "الإداري",
+    "الحكومية",
+    "للدولة",
+    "للإدارة",
+    "للأكاديمية",
+    "السلطاني",
+    "السلطانية",
 }
 
 
@@ -345,6 +354,9 @@ class TopicExtractor:
         for word, _ in counts.most_common(max_additional * 2):
             if len(topics) >= max_additional:
                 break
+
+            if re.fullmatch(r"\d+", word):
+                continue
 
             display_name = word.title() if re.match(r"[A-Za-z]", word) else word
             normalized = normalize_topic_name(display_name)
