@@ -139,37 +139,50 @@ def extract_topics(
         help="Process only documents that do not already have topic links.",
     ),
 ) -> None:
-    """Extract legal topics and link Topic nodes to Document nodes.
+    """Extract legal topics and link Topic nodes to Document nodes."""
 
-    Part 1 stub:
-    LLM and fallback topic extraction will be implemented in later parts.
-    """
+    from src.ingestion.graph_ingest import GraphIngestor
+    from src.llm_agents.topic_extractor import TopicExtractor
 
     settings = get_settings()
 
-    logger.info("Extract-topics command invoked.")
-    logger.info("Topic LLM provider: {}", settings.topic_llm_provider)
-    logger.info("OpenAI configured: {}", settings.is_openai_available)
-    logger.info("Limit: {}", limit)
-    logger.info("Only without topics: {}", only_without_topics)
+    try:
+        extractor = TopicExtractor(settings)
 
-    console.print(
-        Panel(
-            "\n".join(
-                [
-                    "[bold yellow]Part 1 stub[/bold yellow]",
-                    "Topic extraction is not implemented yet.",
-                    "",
-                    f"Topic provider: {settings.topic_llm_provider}",
-                    f"OpenAI configured: {settings.is_openai_available}",
-                    f"Limit: {limit}",
-                    f"Only without topics: {only_without_topics}",
-                ]
-            ),
-            title="extract-topics",
-            border_style="yellow",
+        processed_count = 0
+        linked_topic_count = 0
+
+        with GraphIngestor(settings) as ingestor:
+            ingestor.verify_connection()
+            ingestor.ensure_schema()
+
+            documents = ingestor.fetch_documents(
+                limit=limit,
+                only_without_topics=only_without_topics,
+            )
+
+            for document in documents:
+                topics = extractor.extract(
+                    title=document.get("title") or document["id"],
+                    content_en=document.get("contentEn"),
+                    content_ar=document.get("contentAr"),
+                )
+
+                linked_topic_count += ingestor.link_document_topics(
+                    document_id=document["id"],
+                    topics=topics,
+                )
+                processed_count += 1
+
+        console.print(
+            f"[green]Topic extraction complete[/green]: "
+            f"documents={processed_count}, "
+            f"topic_links={linked_topic_count}"
         )
-    )
+
+    except Exception as exc:
+        logger.exception("Topic extraction failed: {}", exc)
+        raise typer.Exit(code=1) from exc
 
 
 @app.command("embed")
@@ -180,39 +193,105 @@ def embed(
         help="Maximum number of documents/topics to embed.",
     ),
 ) -> None:
-    """Generate embeddings for chunks and topics.
+    """Create Chunk nodes and embeddings for document chunks and Topic nodes."""
 
-    Part 1 stub:
-    Chunking, embedding provider, and embedding cache will be implemented in
-    later parts.
-    """
+    from src.ingestion.graph_ingest import GraphIngestor
+    from src.models import Chunk
+    from src.vector_ops.chunking import MarkdownChunker
+    from src.vector_ops.embeddings import get_embedding_provider
 
     settings = get_settings()
 
-    logger.info("Embed command invoked.")
-    logger.info("Embedding provider: {}", settings.embedding_provider)
-    logger.info("Embedding dimensions: {}", settings.active_embedding_dimensions)
-    logger.info("Embedding cache path: {}", settings.embedding_cache_path)
-    logger.info("Limit: {}", limit)
-
-    console.print(
-        Panel(
-            "\n".join(
-                [
-                    "[bold yellow]Part 1 stub[/bold yellow]",
-                    "Embedding generation is not implemented yet.",
-                    "",
-                    f"Embedding provider: {settings.embedding_provider}",
-                    f"Embedding dimensions: {settings.active_embedding_dimensions}",
-                    f"SentenceTransformer model: {settings.sentence_transformer_model}",
-                    f"Embedding cache path: {settings.embedding_cache_path}",
-                    f"Limit: {limit}",
-                ]
-            ),
-            title="embed",
-            border_style="yellow",
+    try:
+        embedder = get_embedding_provider(settings)
+        chunker = MarkdownChunker(
+            min_tokens=settings.chunk_min_tokens,
+            max_tokens=settings.chunk_max_tokens,
+            overlap_tokens=settings.chunk_overlap_tokens,
         )
-    )
+
+        document_count = 0
+        chunk_count = 0
+        topic_embedding_count = 0
+
+        with GraphIngestor(settings) as ingestor:
+            ingestor.verify_connection()
+            ingestor.ensure_schema()
+
+            documents = ingestor.fetch_documents(limit=limit)
+
+            for document in documents:
+                document_id = document["id"]
+
+                for language, content_key in [
+                    ("en", "contentEn"),
+                    ("ar", "contentAr"),
+                    ("fr", "contentFr"),
+                ]:
+                    markdown = document.get(content_key)
+                    if not markdown:
+                        continue
+
+                    chunks = chunker.chunk_markdown(
+                        markdown,
+                        document_id=document_id,
+                        language=language,
+                    )
+
+                    if not chunks:
+                        continue
+
+                    vectors = embedder.embed_texts([chunk.text for chunk in chunks])
+
+                    embedded_chunks: list[Chunk] = []
+                    for chunk, vector in zip(chunks, vectors, strict=True):
+                        embedded_chunks.append(
+                            Chunk(
+                                id=chunk.id,
+                                document_id=chunk.document_id,
+                                language=chunk.language,
+                                text=chunk.text,
+                                chunk_index=chunk.chunk_index,
+                                embedding=vector,
+                                heading_context=chunk.heading_context,
+                                token_count=chunk.token_count,
+                                metadata=chunk.metadata,
+                            )
+                        )
+
+                    chunk_count += ingestor.batch_upsert_chunks(embedded_chunks)
+
+                document_count += 1
+
+            topics = ingestor.fetch_topics_without_embeddings(limit=limit)
+
+            for topic in topics:
+                topic_text = topic.get("name") or topic.get("normalized_name")
+                normalized_name = topic.get("normalized_name")
+
+                if not topic_text or not normalized_name:
+                    continue
+
+                vector = embedder.embed_text(topic_text)
+
+                # Add this helper method to GraphIngestor if it does not exist yet.
+                ingestor.upsert_topic_embedding(
+                    normalized_name=normalized_name,
+                    embedding=vector,
+                )
+
+                topic_embedding_count += 1
+
+        console.print(
+            f"[green]Embedding complete[/green]: "
+            f"documents={document_count}, "
+            f"chunks={chunk_count}, "
+            f"topic_embeddings={topic_embedding_count}"
+        )
+
+    except Exception as exc:
+        logger.exception("Embedding failed: {}", exc)
+        raise typer.Exit(code=1) from exc
 
 
 @app.command("merge-topics")

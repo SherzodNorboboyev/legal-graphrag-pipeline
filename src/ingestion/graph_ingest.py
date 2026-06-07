@@ -614,6 +614,37 @@ class GraphIngestor:
         with self.driver.session(database=self.database) as session:
             records = session.run(query, limit=limit)
             return [dict(record) for record in records]
+        
+    def upsert_topic_embedding(self, normalized_name: str, embedding: list[float]) -> None:
+        """Set or update embedding vector for one Topic node."""
+
+        if not normalized_name:
+            raise ValueError("normalized_name is required.")
+
+        if not embedding:
+            raise ValueError("embedding must not be empty.")
+
+        self._execute_write(
+            self._tx_upsert_topic_embedding,
+            normalized_name,
+            [float(value) for value in embedding],
+        )
+
+    @staticmethod
+    def _tx_upsert_topic_embedding(tx, normalized_name: str, embedding: list[float]) -> None:
+        """Neo4j transaction function for updating Topic.embedding."""
+
+        query = """
+        MATCH (t:Topic {normalized_name: $normalized_name})
+        SET t.embedding = $embedding,
+            t.updated_at = datetime()
+        """
+
+        tx.run(
+            query,
+            normalized_name=normalized_name,
+            embedding=embedding,
+        ).consume()
 
     @retry(
         reraise=True,
