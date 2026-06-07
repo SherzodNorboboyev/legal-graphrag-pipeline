@@ -64,40 +64,33 @@ def scrape(
         help="Reset crawler checkpoint before scraping.",
     ),
 ) -> None:
-    """Scrape qanoon.om and save raw/Markdown-ready artifacts.
+    """Scrape qanoon.om and save raw HTML/PDF plus parsed Markdown JSON artifacts."""
 
-    Part 1 stub:
-    The real crawler will be implemented in later parts.
-    """
+    import asyncio
+
+    from src.scraper.checkpoint import CheckpointManager
+    from src.scraper.crawler import QanoonCrawler
 
     settings = get_settings()
-    effective_max_pages = max_pages or settings.max_pages
 
-    logger.info("Scrape command invoked.")
-    logger.info("Source: {}", settings.qanoon_base_url)
-    logger.info("English source: {}", settings.decree_base_url)
-    logger.info("Max pages: {}", effective_max_pages)
-    logger.info("Reset checkpoint: {}", reset_checkpoint)
+    try:
+        if reset_checkpoint:
+            CheckpointManager(settings.checkpoint_file).reset()
 
-    console.print(
-        Panel(
-            "\n".join(
-                [
-                    "[bold yellow]Part 1 stub[/bold yellow]",
-                    "Scraper is not implemented yet.",
-                    "",
-                    f"Configured source: {settings.qanoon_base_url}",
-                    f"English source: {settings.decree_base_url}",
-                    f"Raw output directory: {settings.raw_dir}",
-                    f"Markdown output directory: {settings.markdown_dir}",
-                    f"Effective max pages: {effective_max_pages}",
-                    f"Reset checkpoint requested: {reset_checkpoint}",
-                ]
-            ),
-            title="scrape",
-            border_style="yellow",
+        crawler = QanoonCrawler(settings)
+        checkpoint = asyncio.run(crawler.run(max_pages=max_pages))
+
+        console.print(
+            f"[green]Scrape complete[/green]: "
+            f"visited={len(checkpoint.visited_urls)}, "
+            f"queued={len(checkpoint.queued_urls)}, "
+            f"failed={len(checkpoint.failed_urls)}, "
+            f"documents={len(checkpoint.documents)}"
         )
-    )
+
+    except Exception as exc:
+        logger.exception("Scrape failed: {}", exc)
+        raise typer.Exit(code=1) from exc
 
 
 @app.command("ingest")
@@ -108,36 +101,29 @@ def ingest(
         help="Maximum number of local parsed documents to ingest.",
     ),
 ) -> None:
-    """Ingest parsed documents into Neo4j.
+    """Create Neo4j schema and ingest parsed documents from data/markdown."""
 
-    Part 1 stub:
-    Neo4j schema and ingestion will be implemented in later parts.
-    """
+    from src.ingestion.graph_ingest import GraphIngestor
 
     settings = get_settings()
 
     logger.info("Ingest command invoked.")
     logger.info("Neo4j URI: {}", settings.neo4j_uri)
     logger.info("Neo4j database: {}", settings.neo4j_database)
+    logger.info("Markdown input directory: {}", settings.markdown_dir)
     logger.info("Limit: {}", limit)
 
-    console.print(
-        Panel(
-            "\n".join(
-                [
-                    "[bold yellow]Part 1 stub[/bold yellow]",
-                    "Graph ingestion is not implemented yet.",
-                    "",
-                    f"Neo4j URI: {settings.neo4j_uri}",
-                    f"Neo4j database: {settings.neo4j_database}",
-                    f"Markdown input directory: {settings.markdown_dir}",
-                    f"Limit: {limit}",
-                ]
-            ),
-            title="ingest",
-            border_style="yellow",
-        )
-    )
+    try:
+        with GraphIngestor(settings) as ingestor:
+            ingestor.verify_connection()
+            ingestor.ensure_schema()
+            count = ingestor.ingest_markdown_dir(limit=limit)
+
+        console.print(f"[green]Ingestion complete[/green]: {count} documents upserted into Neo4j.")
+
+    except Exception as exc:
+        logger.exception("Ingestion failed: {}", exc)
+        raise typer.Exit(code=1) from exc
 
 
 @app.command("extract-topics")

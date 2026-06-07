@@ -211,3 +211,8 @@ results/
 .datasets/
 logs/
 .DS_Store
+
+# Raw crawler outputs and intermediate data, which can be large and are not necessary to track in version control.
+data/*
+!data/raw/.gitkeep
+!data/markdown/.gitkeep
