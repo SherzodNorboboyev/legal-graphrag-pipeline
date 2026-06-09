@@ -1,119 +1,232 @@
-# Architecture Report Draft
-
-## Project title
-
-Legal GraphRAG Pipeline for Oman Legal Documents
-
-## Current phase
-
-Part 1: repository skeleton, environment configuration, Docker setup, CLI entrypoint, and documentation draft.
-
----
+# Architecture Report: Legal GraphRAG Pipeline for Oman Legal Documents
 
 ## 1. Executive summary
 
-This project implements a GraphRAG pipeline for Oman legal documents from `https://qanoon.om/`.
+This project implements a production-oriented GraphRAG pipeline for Oman legal documents from `https://qanoon.om/`.
 
-The goal is to transform public legal documents into a searchable graph-based retrieval system. The final pipeline will crawl legal documents, normalize HTML/PDF sources into Markdown, store document-level properties in Neo4j, extract topics, create semantic chunks, generate embeddings, and provide hybrid search over graph and vector representations.
+The system converts public legal documents into a structured, searchable graph representation. It combines web scraping, Markdown serialization, Neo4j graph storage, topic extraction, semantic chunking, embeddings, hybrid retrieval, optional CrossEncoder reranking, and topic/community optimization.
 
-The project is designed for staged implementation. Part 1 establishes the production foundation:
+The architecture is designed to be practical for a take-home engineering assessment while preserving production principles:
 
-- deterministic configuration through Pydantic Settings
-- Dockerized Neo4j
-- local data directory structure
-- CLI command surface
-- documentation and architecture draft
+- deterministic environment configuration
+- modular package structure
+- resumable ingestion
+- explicit provenance storage
+- safe fallback paths
+- graph-native schema design
+- hybrid retrieval instead of vector-only retrieval
 
 ---
 
-## 2. Target data flow
+## 2. Architecture overview
 
 ```text
-qanoon.om
-   |
-   v
-Scraper
-   |
-   +--> raw HTML/PDF storage
-   |
-   v
-Markdown converter
-   |
-   v
-Document JSON / Markdown artifacts
-   |
-   v
-Neo4j graph ingestion
-   |
-   +--> Document nodes
-   +--> Topic nodes
-   +--> Chunk nodes
-   |
-   v
-Embeddings and graph relationships
-   |
-   v
-Hybrid retrieval client
+qanoon.om / decree.om
+        |
+        v
+Async Crawler
+        |
+        +--> checkpoint JSON
+        +--> raw HTML/PDF + sidecar metadata
+        |
+        v
+Parser + Markdown Converter
+        |
+        +--> data/markdown/*.json
+        |
+        v
+Neo4j Ingestion
+        |
+        +--> Document nodes
+        +--> AMENDS / REPEALS relationships
+        |
+        v
+Topic Extraction
+        |
+        +--> Topic nodes
+        +--> HAS_TOPIC relationships
+        |
+        v
+Semantic Chunking + Embeddings
+        |
+        +--> Chunk nodes
+        +--> HAS_CHUNK relationships
+        +--> Topic and Chunk embeddings
+        |
+        v
+Hybrid Retrieval
+        |
+        +--> vector search
+        +--> keyword search
+        +--> graph expansion
+        +--> optional reranking
+        +--> answer synthesis
 ```
 
 ---
 
 ## 3. Why GraphRAG
 
-A legal corpus is not just unstructured text. Legal documents contain:
+Flat vector search is useful but incomplete for legal corpora. Laws, decrees, and ministerial decisions are not isolated pieces of text. They include:
 
-- document numbers
-- dates
-- issuers
-- document types
-- Arabic and English language versions
-- amendments
-- repeals
-- references to related legal instruments
-- topics and legal domains
+- document identity
+- document type
+- legal number
+- issuer
+- publication date
+- language versions
+- amendment relationships
+- repeal relationships
+- legal topics
+- topic communities
 
-Flat vector search is useful for semantic similarity, but it loses explicit legal relationships. GraphRAG improves explainability and retrieval quality by combining:
+GraphRAG keeps these relationships explicit. A user query can retrieve a semantically relevant chunk, then traverse to:
 
-1. semantic similarity from embeddings
-2. graph traversal from legal relationships
-3. metadata filtering on document properties
-4. topic-level retrieval and clustering
+- parent document metadata
+- linked legal topics
+- amended or repealed documents
+- related topic communities
+
+This makes retrieval more explainable and better aligned with legal research workflows.
 
 ---
 
-## 4. Planned graph model
+## 4. Scraping strategy
 
-### Document node
+The scraper is implemented with async `httpx`. It starts from configured source URLs, discovers listing/document/PDF/language links, and processes pages safely.
+
+Main scraper capabilities:
+
+- custom browser-like headers
+- random user-agent rotation
+- random throttling
+- retries with exponential backoff
+- timeout handling
+- HTML/PDF content-type detection
+- Arabic/English version discovery
+- raw response persistence
+- sidecar metadata persistence
+- parser error isolation
+- checkpoint/resume
+
+The crawler is intentionally conservative. It does not attempt to bypass hard access controls. If the website serves CAPTCHAs or persistent blocks, the correct behavior is to pause, reduce crawl rate, or request authorized access.
+
+---
+
+## 5. Anti-bot and checkpointing
+
+The crawler includes polite anti-bot resilience:
+
+```text
+random user-agent
+custom Accept/Accept-Language headers
+random throttle delay
+exponential retry with jitter
+checkpointed URL queue
+failed URL registry
+```
+
+Checkpoint state includes:
+
+- visited URLs
+- queued URLs
+- failed URLs
+- parsed document metadata
+- output paths
+
+The checkpoint is saved atomically to avoid corruption if the process is interrupted.
+
+---
+
+## 6. Markdown serialization
+
+All HTML/PDF content is normalized into Markdown because Markdown is:
+
+- readable
+- easy to inspect
+- LLM-friendly
+- suitable for semantic chunking
+- capable of preserving headings and tables
+
+The converter removes:
+
+- scripts
+- styles
+- navigation
+- headers
+- footers
+- tracking-like blocks
+- social/share widgets
+
+The converter preserves:
+
+- H1/H2/H3 hierarchy
+- legal article labels
+- tables as Markdown tables
+- Arabic text order
+- source provenance
+
+PDF extraction uses `pypdf`. If a PDF has no text layer, the pipeline stores raw PDF provenance and creates a warning Markdown wrapper. OCR is not part of the MVP because it increases operational complexity and quality risk.
+
+---
+
+## 7. Graph schema design
+
+The graph uses a simplified legal identity principle: one legal instrument maps to one `Document` node.
+
+### Document
 
 ```text
 (:Document {
   id,
   title,
+  title_ar,
+  title_en,
+  title_fr,
   date,
   document_type,
   number,
   issuer,
   source_url,
+  language,
   contentAr,
   contentEn,
+  contentFr,
+  language_urls,
+  pdf_urls,
+  raw_paths,
+  metadata,
   created_at,
   updated_at
 })
 ```
 
-The design stores Arabic and English Markdown content directly on the same `Document` node. This avoids splitting translations into separate nodes and keeps legal identity centralized.
+Language-specific Markdown is stored directly on the `Document` node:
 
-### Topic node
+```text
+contentAr
+contentEn
+contentFr
+```
+
+This avoids splitting translations into separate graph nodes and keeps the legal identity consolidated.
+
+### Topic
 
 ```text
 (:Topic {
   name,
   normalized_name,
-  embedding
+  embedding,
+  confidence,
+  evidence,
+  source,
+  aliases,
+  metadata
 })
 ```
 
-### Chunk node
+### Chunk
 
 ```text
 (:Chunk {
@@ -122,7 +235,10 @@ The design stores Arabic and English Markdown content directly on the same `Docu
   language,
   text,
   chunk_index,
-  embedding
+  heading_context,
+  token_count,
+  embedding,
+  metadata
 })
 ```
 
@@ -130,150 +246,31 @@ The design stores Arabic and English Markdown content directly on the same `Docu
 
 ```text
 (Document)-[:HAS_TOPIC]->(Topic)
-(Document)-[:HAS_CHUNK {language: "en"|"ar"}]->(Chunk)
+(Document)-[:HAS_CHUNK {language, chunk_index}]->(Chunk)
 (Document)-[:AMENDS]->(Document)
 (Document)-[:REPEALS]->(Document)
 ```
 
----
+Indexes and constraints:
 
-## 5. Part 1 repository design
-
-The current repository contains:
-
-```text
-src/config.py
-```
-
-Central application settings using Pydantic Settings.
-
-```text
-src/main.py
-```
-
-Typer-based CLI with pipeline command stubs.
-
-```text
-docker-compose.yml
-```
-
-Neo4j Community Edition container with persistent volumes.
-
-```text
-data/
-```
-
-Local runtime data directories.
-
-```text
-README.md
-```
-
-Setup and usage documentation.
+- unique `Document.id`
+- unique `Topic.normalized_name`
+- unique `Chunk.id`
+- document lookup indexes
+- full-text indexes for document/chunk/topic search
+- vector indexes for chunk/topic embeddings where Neo4j supports them
 
 ---
 
-## 6. Configuration strategy
+## 8. LLM topic extraction
 
-All runtime values are controlled through environment variables. The repository includes `.env.example` as the template.
+Topic extraction is implemented with two modes:
 
-Key configuration categories:
+### OpenAI mode
 
-- application environment
-- data paths
-- source websites
-- scraper behavior
-- Neo4j connection
-- embedding provider
-- LLM provider
-- chunking settings
-- hybrid retrieval settings
-- topic merging threshold
+When configured, the system sends English content first, otherwise Arabic content, to an LLM with a JSON-only prompt.
 
-This avoids hardcoded secrets and makes the project portable across local, staging, and production environments.
-
----
-
-## 7. Logging strategy
-
-The project uses Loguru for structured CLI-friendly logging.
-
-Logging goals:
-
-- consistent format across commands
-- configurable log level
-- clear startup diagnostics
-- readable error messages
-- no accidental secret logging
-
-Part 1 configures logging centrally in `src/config.py`, and each CLI command initializes logging before execution.
-
----
-
-## 8. Docker and Neo4j design
-
-Neo4j is deployed through Docker Compose with:
-
-- HTTP browser exposed on port `7474`
-- Bolt driver exposed on port `7687`
-- persistent data volume
-- persistent logs volume
-- persistent plugins volume
-- APOC plugin enabled for future graph utilities
-
-The initial setup uses Neo4j Community Edition. Advanced community detection such as Louvain may require Neo4j Graph Data Science in later stages.
-
----
-
-## 9. Planned scraper architecture
-
-Future scraper modules will include:
-
-```text
-src/scraper/crawler.py
-src/scraper/parser.py
-src/scraper/markdown_converter.py
-src/scraper/checkpoint.py
-```
-
-The scraper should support:
-
-- retry with exponential backoff
-- random user-agent headers
-- polite throttling
-- checkpoint/resume
-- raw HTML/PDF storage
-- Arabic/English version linking
-- robust parser fallbacks if selectors change
-- logging and continuation on page-level errors
-
----
-
-## 10. Planned Markdown serialization strategy
-
-The Markdown conversion layer should:
-
-- remove scripts and tracking markup
-- remove navigation and layout noise
-- preserve H1/H2/H3 hierarchy
-- convert tables to Markdown tables
-- preserve Arabic text without direction corruption
-- support PDF text extraction when a text layer exists
-
-Markdown is chosen because it is:
-
-- readable
-- LLM-friendly
-- easy to chunk semantically
-- suitable for provenance review
-
----
-
-## 11. Planned topic extraction strategy
-
-Topic extraction will use `contentEn` first where available. If no English text exists, it will use `contentAr`.
-
-The LLM prompt should request structured JSON:
+Expected schema:
 
 ```json
 {
@@ -281,144 +278,359 @@ The LLM prompt should request structured JSON:
     {
       "name": "Taxation",
       "normalized_name": "taxation",
-      "confidence": 0.93,
-      "evidence": "short supporting phrase"
+      "confidence": 0.92,
+      "evidence": "taxable income"
     }
   ]
 }
 ```
 
-The implementation should include:
+The extractor includes:
 
-- JSON schema expectations in the prompt
-- retry on invalid JSON
-- safe parsing
-- deterministic keyword fallback
-- normalized topic names for deduplication
+- JSON-only system prompt
+- bounded content length
+- repair prompt on invalid JSON
+- retry logic
+- Pydantic validation
+- confidence filtering
+- max topic limit
+- deduplication by normalized name
+
+### Fallback mode
+
+If OpenAI is not configured or fails, deterministic keyword extraction is used. It recognizes common legal domains such as:
+
+- Taxation
+- Customs
+- Labour Regulation
+- Omanization
+- Public Health
+- Education
+- Environmental Protection
+- Real Estate
+- Maritime Law
+- Banking Regulation
+- Competition Law
+- Judicial Administration
+
+Fallback extraction also uses title terms, with stopword and numeric filtering to avoid noisy year-like or generic topics.
 
 ---
 
-## 12. Planned chunking and embedding strategy
+## 9. Chunking and embeddings
 
-Chunking target:
+The chunker is Markdown-aware. It parses headings, preserves heading context, and chunks documents into target sizes.
 
-- 500-1000 approximate tokens
-- overlap support
-- Markdown heading context preservation
-- chunk metadata persistence
+Defaults:
+
+```text
+CHUNK_MIN_TOKENS=500
+CHUNK_MAX_TOKENS=900
+CHUNK_OVERLAP_TOKENS=120
+```
+
+Chunk metadata includes:
+
+- document ID
+- language
+- chunk index
+- text
+- heading context
+- token count
+- deterministic chunk ID
 
 Embeddings:
 
-- SentenceTransformers by default
-- OpenAI embeddings optionally
-- local embedding cache
-- embeddings for both `Topic` and `Chunk` nodes
+- SentenceTransformers default
+- OpenAI optional
+- deterministic hashing fallback if model loading fails
+- SQLite cache to avoid recomputation
+- batch embedding support
+- dimension validation
+- cosine similarity helper
+
+Embeddings are generated for:
+
+- every `Chunk`
+- every `Topic`
 
 ---
 
-## 13. Planned hybrid retrieval strategy
+## 10. Hybrid retrieval design
 
-The search client will combine:
+The retrieval system uses multi-stage search.
 
-1. vector similarity over chunk embeddings
-2. keyword or BM25-style matching
-3. graph traversal for document and topic context
-4. optional cross-encoder reranking
-5. final answer synthesis
+### Stage 1: Candidate generation
 
-The CLI should display:
+Dense vector search:
 
-- top matching chunks
-- parent document metadata
+```text
+Neo4j vector index over Chunk.embedding
+```
+
+Sparse keyword search:
+
+```text
+Neo4j full-text index over Chunk.text
+```
+
+Fallbacks:
+
+- Python cosine scan for small datasets if vector index is unavailable
+- Neo4j `CONTAINS` keyword fallback if full-text index fails
+
+### Stage 2: Score normalization and merge
+
+Vector and keyword scores are normalized to 0-1 and combined:
+
+```text
+combined_score = vector_score * HYBRID_VECTOR_WEIGHT
+               + keyword_score * HYBRID_KEYWORD_WEIGHT
+```
+
+Default weights:
+
+```text
+HYBRID_VECTOR_WEIGHT=0.65
+HYBRID_KEYWORD_WEIGHT=0.35
+```
+
+### Stage 3: Graph context expansion
+
+For each chunk candidate, the retriever appends:
+
+- parent document title
+- document number
+- document type
+- date
+- issuer
+- source URL
 - linked topics
-- summarized final answer
+- language
+- chunk text
+
+This expanded context improves reranking and answer synthesis.
 
 ---
 
-## 14. Scaling considerations
+## 11. CrossEncoder reranking
 
-Potential bottlenecks:
+CrossEncoder reranking is optional. It is more accurate than bi-encoder similarity because it scores query-candidate pairs jointly.
 
-- crawling throughput and website throttling
-- PDF extraction quality and latency
-- LLM topic extraction cost
-- embedding generation throughput
-- Neo4j write throughput
-- vector index performance
-- cross-encoder reranking latency
+Default model:
 
-Planned mitigations:
+```text
+BAAI/bge-reranker-base
+```
 
-- resumable crawling
-- batched graph writes
-- embedding cache
-- queue-based ingestion stages
-- limiting reranking to top candidates
-- optional local or hosted model providers
+The implementation supports:
+
+- lazy model loading
+- batch reranking
+- fallback to hybrid scores if loading fails
+- top-N selection after reranking
+
+Latency trade-off:
+
+- Vector search is fast and scalable.
+- CrossEncoder reranking is slower but improves precision.
+- The system reranks only the top candidate pool to control latency.
 
 ---
 
-## 15. Risk and fallback plan
+## 12. Topic merging
+
+LLMs and fallback extractors can produce duplicate topics such as:
+
+```text
+Labour Policies
+Labour Regulation
+Labor Regulation
+```
+
+The topic merger:
+
+1. Fetches topics with embeddings.
+2. Computes cosine similarity.
+3. Groups topics above a threshold.
+4. Chooses a canonical topic name.
+5. Consolidates incoming `HAS_TOPIC` relationships.
+6. Deletes duplicate topic nodes.
+7. Preserves aliases.
+
+Default threshold:
+
+```text
+TOPIC_MERGE_SIMILARITY=0.88
+```
+
+The command supports dry-run mode and should be reviewed before applying.
+
+---
+
+## 13. Community detection
+
+Community detection is implemented as a Neo4j GDS Louvain function.
+
+Graph projection:
+
+```text
+Document -- HAS_TOPIC -- Topic
+```
+
+Writeback property:
+
+```text
+community_id
+```
+
+If Neo4j GDS is unavailable, the command returns a safe warning instead of failing the pipeline.
+
+Community detection is useful for discovering legal subfields, such as:
+
+- taxation and fees
+- labour and workforce policy
+- transport and infrastructure
+- education and public institutions
+- banking and financial regulation
+
+---
+
+## 14. Scaling to 1,000,000 legal articles
+
+At large scale, the main bottlenecks are:
+
+1. Crawl throughput and politeness constraints.
+2. PDF extraction and OCR requirements.
+3. LLM topic extraction cost.
+4. Embedding generation throughput.
+5. Neo4j write throughput.
+6. Vector index build and update latency.
+7. CrossEncoder reranking latency.
+8. Graph traversal fan-out.
+
+Recommended scaling architecture:
+
+```text
+Crawler workers
+    |
+Message queue
+    |
+Parser workers
+    |
+Object storage raw data
+    |
+Embedding workers
+    |
+Batch graph writer
+    |
+Neo4j cluster / read replicas
+    |
+Search service
+```
+
+Optimizations:
+
+- batch graph writes
+- cache embeddings
+- precompute topic embeddings
+- separate ingestion from query workloads
+- use worker queues
+- use retryable idempotent writes
+- limit CrossEncoder reranking to top 20-50 candidates
+- optionally use a dedicated vector database if Neo4j vector search becomes limiting
+
+---
+
+## 15. Latency trade-offs
+
+### Vector search
+
+Fast and scalable, but may retrieve semantically close but legally incomplete chunks.
+
+### Keyword search
+
+Precise for legal numbers, names, and exact terms, but misses paraphrases.
+
+### Graph expansion
+
+Adds explainability and metadata but requires graph traversal.
+
+### CrossEncoder reranking
+
+Improves ranking quality but adds model inference latency.
+
+### LLM synthesis
+
+Produces a readable answer but adds cost and latency. The fallback extractive answer remains deterministic and offline.
+
+Latency strategy:
+
+```text
+retrieve top_k fast
+batch graph expansion
+rerank only top candidates
+synthesize from top_n only
+cache frequent embeddings
+keep fallback paths available
+```
+
+---
+
+## 16. Risks and fallbacks
 
 | Risk | Fallback |
 |---|---|
-| qanoon.om HTML changes | defensive parser and selector TODOs |
-| network errors | retry and checkpoint resume |
-| anti-bot throttling | random pacing and user-agent rotation |
-| invalid LLM output | safe JSON parser and retry |
-| no LLM key | keyword-based fallback extraction |
-| Neo4j vector index unavailable | Python-side cosine fallback |
-| scanned PDF | store raw file and log extraction limitation |
+| Website HTML changes | Defensive parser and TODO selector points |
+| Network interruption | Checkpoint/resume |
+| Rate limiting | Random throttle, retry, checkpoint |
+| CAPTCHA | Pause/reduce rate/request access |
+| Invalid LLM JSON | Safe parser and repair prompt |
+| No LLM key | Deterministic fallback extraction |
+| Model download failure | Hashing embedding fallback |
+| Neo4j vector index unavailable | Python cosine fallback |
+| Full-text index unavailable | CONTAINS fallback |
+| GDS unavailable | Safe community detection warning |
+| Scanned PDF | Store raw PDF and warning wrapper |
 
 ---
 
-## 16. Implementation roadmap
+## 17. Evaluation readiness
 
-### Part 1
+The repository demonstrates:
 
-- repository skeleton
-- dependencies
-- environment configuration
-- Docker Compose
-- Pydantic Settings
-- Typer CLI stubs
-- README draft
-- architecture draft
-
-### Part 2
-
-- scraper
-- retry logic
-- checkpointing
-- raw HTML/PDF persistence
-
-### Part 3
-
-- parser
-- Markdown converter
-- tests for HTML and table conversion
-
-### Part 4
-
-- Neo4j schema
-- graph ingestion
-- document relationship extraction
-
-### Part 5
-
-- topic extraction
-- chunking
-- embeddings
-
-### Part 6
-
-- hybrid retrieval
-- reranker
-- topic merging
-- final tests and submission hardening
+- modular architecture
+- Pydantic validation
+- deterministic IDs
+- configurable environment
+- Dockerized Neo4j
+- real CLI orchestration
+- tests for parser, models, chunking, topic extraction, reranking, and topic merging
+- fallback logic for optional external dependencies
+- clear documentation and troubleshooting
+- sample data for offline demo
 
 ---
 
-## 17. Current limitations
+## 18. Final operational sequence
 
-This is the initial architecture and repository foundation only. The CLI commands are stubs and do not yet perform scraping, ingestion, extraction, embedding, merging, or search. Later parts will replace each stub with real implementation while preserving the same command surface.
+```bash
+docker compose up -d neo4j
+
+python -m src.main doctor
+python -m src.main setup-schema
+
+python -m src.main scrape --max-pages 25
+python -m src.main ingest
+python -m src.main extract-topics
+python -m src.main embed
+
+python -m src.main merge-topics --dry-run
+python -m src.main search "What are the laws about taxation?"
+```
+
+For the standalone search client:
+
+```bash
+python -m src.search_client "What are the laws about taxation?"
+```

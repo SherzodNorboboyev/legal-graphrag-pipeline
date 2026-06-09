@@ -213,6 +213,16 @@ logs/
 .DS_Store
 
 # Raw crawler outputs and intermediate data, which can be large and are not necessary to track in version control.
-data/*
+# Ignore everything under data
+data/**
+
+# Keep directory placeholders
+!data/raw/
+!data/markdown/
+!data/sample_output/
+
 !data/raw/.gitkeep
 !data/markdown/.gitkeep
+
+# Keep sample outputs
+!data/sample_output/*

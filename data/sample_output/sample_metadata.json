@@ -1,0 +1,62 @@
+{
+  "id": "doc-sample-tax-registration-2026",
+  "title": "Sample Royal Decree 10/2026 on Tax Registration Fees",
+  "title_ar": "نموذج مرسوم سلطاني رقم ١٠ / ٢٠٢٦ بشأن رسوم التسجيل الضريبي",
+  "title_en": "Sample Royal Decree 10/2026 on Tax Registration Fees",
+  "title_fr": null,
+  "date": "2026-01-10",
+  "document_type": "Royal Decree",
+  "number": "10/2026",
+  "issuer": "Sultan of Oman",
+  "source_url": "https://qanoon.om/sample/2026/rd2026010/",
+  "language": "en",
+  "language_urls": {
+    "ar": "https://qanoon.om/sample/2026/rd2026010/",
+    "en": "https://decree.om/sample/2026/rd2026010/"
+  },
+  "pdf_urls": [],
+  "raw_paths": {
+    "ar": "data/sample_output/sample_document_ar.md",
+    "en": "data/sample_output/sample_document_en.md"
+  },
+  "contentAr": "# نموذج مرسوم سلطاني رقم ١٠ / ٢٠٢٦ بشأن رسوم التسجيل الضريبي\n\n## المادة الأولى\n\nتنظم أحكام هذا النموذج رسوم التسجيل الضريبي للمنشآت التجارية التي تمارس نشاطا منظما في سلطنة عمان.\n\n## المادة الثانية\n\nيجب على كل منشأة خاضعة للضريبة تقديم بيانات التسجيل إلى الجهة الضريبية المختصة قبل مباشرة النشاط التجاري المنظم.\n\n## المادة الثالثة\n\nيجوز للجهة المختصة إصدار قرارات إدارية تحدد جدول الرسوم وإجراءات التقديم والإعفاءات المقررة للمؤسسات الصغيرة.\n\n## المادة الرابعة\n\nيلغى كل ما يخالف هذا النموذج أو يتعارض مع أحكامه في حدود ذلك التعارض.\n\n## جدول الرسوم\n\n| الخدمة | الرسم | ملاحظات |\n| --- | --- | --- |\n| التسجيل الضريبي الجديد | ١٠ ريالات عمانية | يدفع مرة واحدة |\n| التجديد السنوي | ٥ ريالات عمانية | يدفع سنويا |\n| غرامة التأخير | ٢٠ ريالا عمانيا | تطبق بعد انتهاء المهلة |\n\n## تنبيه المصدر\n\nهذه بيانات نموذجية اصطناعية لاختبار خط الأنابيب محليا، وليست نصا قانونيا رسميا.\n",
+  "contentEn": "# Sample Royal Decree 10/2026 on Tax Registration Fees\n\n## Article One\n\nThe provisions of this sample decree regulate tax registration fees for commercial entities operating in the Sultanate of Oman.\n\n## Article Two\n\nEvery taxable entity must submit registration information to the competent tax authority before commencing regulated commercial activity.\n\n## Article Three\n\nThe competent authority may issue administrative decisions specifying the fee schedule, filing procedure, and exemptions for small enterprises.\n\n## Article Four\n\nAny provision that contradicts this sample decree is repealed to the extent of the contradiction.\n\n## Schedule\n\n| Service | Fee | Notes |\n| --- | --- | --- |\n| New tax registration | 10 OMR | Payable once |\n| Annual renewal | 5 OMR | Payable each year |\n| Late filing penalty | 20 OMR | Applies after the deadline |\n\n## Source Notice\n\nThis is synthetic sample data for local pipeline testing. It is not an official legal text.\n",
+  "contentFr": null,
+  "cross_references": [
+    {
+      "relation_type": "REPEALS",
+      "target_document_id": null,
+      "target_number": "1/2020",
+      "target_document_type": "Royal Decree",
+      "raw_text": "Any provision that contradicts this sample decree is repealed",
+      "context": "Any provision that contradicts this sample decree is repealed to the extent of the contradiction."
+    }
+  ],
+  "topics": [
+    {
+      "name": "Taxation",
+      "normalized_name": "taxation",
+      "confidence": 0.95,
+      "evidence": "tax registration fees",
+      "source": "sample",
+      "metadata": {}
+    },
+    {
+      "name": "Fees",
+      "normalized_name": "fees",
+      "confidence": 0.9,
+      "evidence": "fee schedule",
+      "source": "sample",
+      "metadata": {}
+    }
+  ],
+  "chunks": [],
+  "metadata": {
+    "sample": true,
+    "official_text": false,
+    "description": "Synthetic sample document compatible with the LegalDocument ingestion schema.",
+    "created_for": "legal-graphrag-pipeline"
+  },
+  "created_at": "2026-01-10T00:00:00+00:00",
+  "updated_at": null
+}

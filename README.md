@@ -1,23 +1,94 @@
 # legal-graphrag-pipeline
 
-Legal GraphRAG pipeline for Oman legal documents from [qanoon.om](https://qanoon.om/).
+Production-oriented Legal GraphRAG pipeline for Oman legal documents from [qanoon.om](https://qanoon.om/).
 
-This repository is designed as a production-oriented take-home assignment project. The final pipeline will support:
-
-1. Crawling Oman legal documents from `qanoon.om`
-2. Discovering Arabic and English versions where available
-3. Persisting raw HTML/PDF assets
-4. Converting legal content into structured Markdown
-5. Ingesting legal documents into Neo4j
-6. Extracting legal topics with LLM or deterministic fallback logic
-7. Creating semantic chunks and embeddings
-8. Performing hybrid retrieval using vector search, keyword search, and graph traversal
-
-> Current status: **Part 1 skeleton**. The CLI commands are intentionally present as stubs and will be implemented in later parts.
+The pipeline crawls public legal documents, converts HTML/PDF content to Markdown, stores consolidated multilingual legal documents in Neo4j, extracts topics, creates semantic chunks and embeddings, and exposes hybrid graph/vector search through a CLI.
 
 ---
 
-## Project structure
+## 1. Project overview
+
+This repository implements an end-to-end GraphRAG system for Oman legislation.
+
+Pipeline stages:
+
+1. **Scrape** qanoon.om and linked English translation pages.
+2. **Persist raw provenance** as HTML/PDF plus metadata.
+3. **Convert content to Markdown** while preserving legal hierarchy and tables.
+4. **Ingest into Neo4j** as `Document`, `Topic`, and `Chunk` nodes.
+5. **Extract legal topics** using OpenAI when configured or deterministic fallback logic.
+6. **Chunk Markdown semantically** with heading context and overlap.
+7. **Generate embeddings** with SentenceTransformers by default or OpenAI optionally.
+8. **Search with hybrid retrieval**: dense vector search, sparse keyword search, graph expansion, optional cross-encoder reranking, and answer synthesis.
+
+---
+
+## 2. Architecture diagram
+
+```text
++-----------------------------+
+|        qanoon.om            |
+| Arabic legal HTML/PDF       |
++--------------+--------------+
+               |
+               | English links where available
+               v
++-----------------------------+
+|        decree.om            |
+| English translations        |
++--------------+--------------+
+               |
+               v
++-----------------------------+
+| Scraper                     |
+| - async HTTP                |
+| - retry/backoff             |
+| - random user-agent         |
+| - throttling                |
+| - checkpoint/resume         |
++--------------+--------------+
+               |
+               v
++-----------------------------+
+| Raw Store                   |
+| data/raw/*.html             |
+| data/raw/*.pdf              |
+| data/raw/*.json metadata    |
++--------------+--------------+
+               |
+               v
++-----------------------------+
+| Markdown Serialization      |
+| - clean noise               |
+| - preserve headings         |
+| - preserve tables           |
+| - Arabic-safe whitespace    |
++--------------+--------------+
+               |
+               v
++-----------------------------+
+| Neo4j Graph                 |
+| Document                    |
+| Topic                       |
+| Chunk                       |
+| AMENDS / REPEALS            |
+| HAS_TOPIC / HAS_CHUNK       |
++--------------+--------------+
+               |
+               v
++-----------------------------+
+| Vector and Graph Retrieval  |
+| - dense vector search       |
+| - full-text keyword search  |
+| - graph context expansion   |
+| - optional cross-encoder    |
+| - final answer synthesis    |
++-----------------------------+
+```
+
+---
+
+## 3. Repository structure
 
 ```text
 legal-graphrag-pipeline/
@@ -26,147 +97,92 @@ legal-graphrag-pipeline/
 ├── .env.example
 ├── docker-compose.yml
 ├── architecture_report.md
+├── Makefile
 ├── src/
 │   ├── __init__.py
 │   ├── config.py
-│   └── main.py
-└── data/
-    ├── raw/
-    │   └── .gitkeep
-    ├── markdown/
-    │   └── .gitkeep
-    └── sample_output/
-        └── .gitkeep
-```
-
-Planned final structure:
-
-```text
-legal-graphrag-pipeline/
-├── src/
+│   ├── main.py
+│   ├── models.py
 │   ├── scraper/
+│   │   ├── __init__.py
 │   │   ├── crawler.py
 │   │   ├── parser.py
 │   │   ├── markdown_converter.py
 │   │   └── checkpoint.py
 │   ├── ingestion/
+│   │   ├── __init__.py
 │   │   ├── graph_schema.py
 │   │   └── graph_ingest.py
 │   ├── llm_agents/
-│   │   ├── topic_extractor.py
-│   │   └── prompts.py
+│   │   ├── __init__.py
+│   │   ├── prompts.py
+│   │   └── topic_extractor.py
 │   ├── vector_ops/
-│   │   ├── embeddings.py
+│   │   ├── __init__.py
 │   │   ├── chunking.py
+│   │   ├── embeddings.py
 │   │   └── topic_merging.py
 │   ├── retrieval/
+│   │   ├── __init__.py
 │   │   ├── hybrid_search.py
 │   │   └── reranker.py
 │   └── search_client.py
+├── data/
+│   ├── raw/
+│   ├── markdown/
+│   └── sample_output/
+│       ├── sample_document_en.md
+│       ├── sample_document_ar.md
+│       └── sample_metadata.json
 └── tests/
 ```
 
 ---
 
-## Architecture overview
-
-```text
-+---------------------+
-|     qanoon.om       |
-| HTML / PDF sources  |
-+----------+----------+
-           |
-           v
-+-----------------------------+
-| Scraper                     |
-| - retries                   |
-| - throttling                |
-| - checkpointing             |
-| - Arabic/English discovery  |
-+-------------+---------------+
-              |
-              v
-+-----------------------------+
-| Raw Data Store              |
-| data/raw/*.html             |
-| data/raw/*.pdf              |
-| metadata sidecars           |
-+-------------+---------------+
-              |
-              v
-+-----------------------------+
-| Markdown Transformer        |
-| - headings                  |
-| - tables                    |
-| - body cleanup              |
-+-------------+---------------+
-              |
-              v
-+-----------------------------+
-| Neo4j Graph                 |
-| Document / Topic / Chunk    |
-| AMENDS / REPEALS / HAS_*    |
-+-------------+---------------+
-              |
-              v
-+-----------------------------+
-| GraphRAG Retrieval          |
-| vector + keyword + graph    |
-| optional cross-encoder      |
-+-----------------------------+
-```
-
----
-
-## Technology stack
+## 4. Technology stack
 
 - Python 3.11+
 - Typer CLI
 - Pydantic Settings
 - Loguru logging
-- Neo4j graph database
-- Docker Compose
-- BeautifulSoup / lxml for parsing
-- Markdownify or custom Markdown conversion
-- SentenceTransformers or OpenAI embeddings
-- Optional Playwright crawler fallback
-- Pytest for tests in later parts
+- httpx async crawler
+- BeautifulSoup / lxml parsing
+- markdownify and custom table conversion
+- Neo4j 5 Community Edition
+- SentenceTransformers default embeddings
+- OpenAI optional embeddings, topic extraction, and synthesis
+- SQLite embedding cache
+- CrossEncoder reranker optional
+- pytest test suite
 
 ---
 
-## Requirements
-
-Install Python dependencies:
+## 5. Setup
 
 ```bash
+git clone <your-repo-url> legal-graphrag-pipeline
+cd legal-graphrag-pipeline
+
 python3.11 -m venv .venv
 source .venv/bin/activate
 
 pip install --upgrade pip
 pip install -r requirements.txt
-```
 
----
-
-## Environment setup
-
-Copy the example environment file:
-
-```bash
 cp .env.example .env
 ```
 
-Review and update values:
+Optional Playwright browser install:
 
-```dotenv
-NEO4J_PASSWORD=please-change-me
-QANOON_BASE_URL=https://qanoon.om/
-DECREE_BASE_URL=https://decree.om/
+```bash
+playwright install chromium
 ```
+
+Playwright is disabled by default. Enable only if HTML rendering fallback is needed.
 
 ---
 
-## Docker Compose setup
+## 6. Docker Neo4j
 
 Start Neo4j:
 
@@ -187,9 +203,7 @@ username: neo4j
 password: please-change-me
 ```
 
-For any real environment, change `NEO4J_PASSWORD` before first startup.
-
-Stop services:
+Stop Neo4j:
 
 ```bash
 docker compose down
@@ -201,145 +215,297 @@ Remove local Neo4j volumes:
 docker compose down -v
 ```
 
+Change `NEO4J_PASSWORD` before any non-local deployment.
+
 ---
 
-## CLI usage
+## 7. Environment variables
 
-The Part 1 CLI is available through:
+| Variable | Description |
+|---|---|
+| `APP_ENV` | Runtime environment label. |
+| `LOG_LEVEL` | Default logging level. |
+| `DATA_DIR` | Root data directory. |
+| `RAW_DIR` | Raw HTML/PDF output directory. |
+| `MARKDOWN_DIR` | Parsed document JSON output directory. |
+| `SAMPLE_OUTPUT_DIR` | Sample output directory. |
+| `CHECKPOINT_FILE` | Crawl checkpoint path. |
+| `EMBEDDING_CACHE_PATH` | SQLite embedding cache path. |
+| `QANOON_BASE_URL` | Arabic source website. |
+| `DECREE_BASE_URL` | English translation source. |
+| `SCRAPE_ENGLISH` | Whether to fetch linked English pages. |
+| `USE_PLAYWRIGHT` | Optional browser rendering fallback. |
+| `MAX_PAGES` | Default crawl budget. |
+| `REQUEST_TIMEOUT_SECONDS` | HTTP timeout. |
+| `REQUEST_RETRIES` | Retry count per request. |
+| `THROTTLE_MIN_SECONDS` | Minimum random delay between requests. |
+| `THROTTLE_MAX_SECONDS` | Maximum random delay between requests. |
+| `NEO4J_URI` | Neo4j Bolt URI. |
+| `NEO4J_USER` | Neo4j username. |
+| `NEO4J_PASSWORD` | Neo4j password. |
+| `NEO4J_DATABASE` | Neo4j database name. |
+| `NEO4J_VECTOR_DIMENSIONS` | Default vector dimensions for local embeddings. |
+| `EMBEDDING_PROVIDER` | `sentence_transformers` or `openai`. |
+| `SENTENCE_TRANSFORMER_MODEL` | Local embedding model. |
+| `OPENAI_API_KEY` | Optional OpenAI key. |
+| `TOPIC_LLM_PROVIDER` | `fallback` or `openai`. |
+| `OPENAI_CHAT_MODEL` | OpenAI chat model for topic extraction/synthesis. |
+| `SYNTHESIS_PROVIDER` | `fallback` or `openai`. |
+| `CHUNK_MIN_TOKENS` | Minimum chunk size target. |
+| `CHUNK_MAX_TOKENS` | Maximum chunk size target. |
+| `CHUNK_OVERLAP_TOKENS` | Chunk overlap. |
+| `HYBRID_VECTOR_WEIGHT` | Dense search score weight. |
+| `HYBRID_KEYWORD_WEIGHT` | Keyword score weight. |
+| `RERANKER_ENABLED` | Enable CrossEncoder reranking. |
+| `CROSS_ENCODER_MODEL` | CrossEncoder reranker model. |
+| `TOPIC_MERGE_SIMILARITY` | Default duplicate topic merge threshold. |
+
+---
+
+## 8. Full pipeline commands
+
+Recommended local flow:
 
 ```bash
-python -m src.main --help
-```
+docker compose up -d neo4j
 
-Available commands:
+python -m src.main doctor
+python -m src.main setup-schema
 
-```bash
-python -m src.main scrape
+python -m src.main scrape --max-pages 25
 python -m src.main ingest
 python -m src.main extract-topics
 python -m src.main embed
-python -m src.main merge-topics
+
+python -m src.main merge-topics --dry-run
 python -m src.main search "What are the laws about taxation?"
 ```
 
-Current commands are stubs. They validate configuration, initialize logging, and show the intended pipeline stage.
+Full crawl:
+
+```bash
+python -m src.main scrape
+```
+
+Resume crawl automatically:
+
+```bash
+python -m src.main scrape
+```
+
+Restart crawl from scratch:
+
+```bash
+python -m src.main scrape --reset-checkpoint
+```
+
+Dry-run examples:
+
+```bash
+python -m src.main scrape --max-pages 25 --dry-run
+python -m src.main ingest --dry-run
+python -m src.main extract-topics --dry-run
+python -m src.main embed --dry-run
+python -m src.main merge-topics --dry-run
+```
 
 ---
 
-## Data directories
+## 9. CLI search usage
 
-```text
-data/raw/
+Main CLI:
+
+```bash
+python -m src.main search "What are the laws about taxation?"
 ```
 
-Raw HTML/PDF files and metadata will be stored here.
+Standalone search client:
 
-```text
-data/markdown/
+```bash
+python -m src.search_client "What are the laws about taxation?"
+python -m src.search_client "What are the rules about labour regulation?" --top-k 50 --top-n 5 --debug
 ```
 
-Normalized Markdown document JSON or Markdown files will be stored here.
+The search output shows:
+
+- vector-matched chunks
+- keyword matches
+- parent document metadata
+- linked topics
+- final summarized answer
+
+---
+
+## 10. Testing
+
+Run all tests:
+
+```bash
+pytest
+```
+
+Run selected tests:
+
+```bash
+python -m pytest tests/test_markdown_converter.py tests/test_parser.py
+python -m pytest tests/test_graph_models.py
+python -m pytest tests/test_chunking.py tests/test_topic_extractor.py
+python -m pytest tests/test_reranker.py tests/test_topic_merging.py
+```
+
+---
+
+## 11. Sample data
+
+Sample files are included under:
 
 ```text
 data/sample_output/
 ```
 
-Sample outputs for submission and review will be stored here.
-
----
-
-## Planned pipeline stages
-
-### 1. Scraping
-
-The scraper will:
-
-- Crawl `qanoon.om`
-- Discover legal document links
-- Discover Arabic and English versions
-- Handle HTML and PDF sources
-- Save raw files and metadata
-- Support retry, throttling, random user-agent headers, and checkpoint resume
-
-### 2. Markdown serialization
-
-The Markdown converter will:
-
-- Remove scripts, styles, tracking blocks, and layout noise
-- Preserve legal headings
-- Preserve tables as Markdown tables
-- Keep Arabic text intact
-- Normalize HTML/PDF content into one format
-
-### 3. Graph ingestion
-
-Neo4j will store:
-
-```text
-(:Document)
-(:Topic)
-(:Chunk)
-```
-
-Relationships:
-
-```text
-(Document)-[:HAS_TOPIC]->(Topic)
-(Document)-[:HAS_CHUNK]->(Chunk)
-(Document)-[:AMENDS]->(Document)
-(Document)-[:REPEALS]->(Document)
-```
-
-### 4. Topic extraction
-
-Topic extraction will use:
-
-- English content first if available
-- Arabic content if English is unavailable
-- Structured JSON prompts
-- Safe JSON parsing and retry logic
-- Deterministic keyword fallback
-
-### 5. Chunking and embeddings
-
-The vector pipeline will:
-
-- Chunk Markdown into semantic 500-1000 token chunks
-- Preserve heading context
-- Generate chunk and topic embeddings
-- Cache embeddings locally
-- Store vectors in Neo4j
-
-### 6. Hybrid retrieval
-
-Search will combine:
-
-- Dense vector similarity
-- Keyword/BM25-style retrieval
-- Parent document metadata
-- Linked topic traversal
-- Optional cross-encoder reranking
-- Final grounded answer synthesis
-
----
-
-## Local development commands
-
-Format and lint tools are not enforced in Part 1, but recommended later:
+To ingest the sample document:
 
 ```bash
-pytest -q
-python -m src.main --help
-python -m src.main scrape
+mkdir -p data/markdown
+cp data/sample_output/sample_metadata.json data/markdown/sample_metadata.json
+
+python -m src.main setup-schema
+python -m src.main ingest --limit 1
+python -m src.main extract-topics --limit 1
+python -m src.main embed --limit 1
+python -m src.main search "tax registration fees"
+```
+
+Or use Makefile:
+
+```bash
+make ingest-sample
+make search QUERY="tax registration fees"
 ```
 
 ---
 
-## Known limitations in Part 1
+## 12. Troubleshooting
 
-- Scraping is not implemented yet.
-- Neo4j schema creation is not implemented yet.
-- Topic extraction is not implemented yet.
-- Embedding generation is not implemented yet.
-- Search is a CLI stub only.
-- Tests will be added in later parts.
+### Neo4j authentication fails
+
+Ensure `.env` and `docker-compose.yml` use the same password. If Neo4j was already initialized with a different password, recreate the volume:
+
+```bash
+docker compose down -v
+docker compose up -d neo4j
+```
+
+### Vector index creation fails
+
+Neo4j vector index support depends on Neo4j version. The schema setup treats vector indexes as optional. Retrieval can fall back to Python cosine scanning for small datasets.
+
+### Full-text search fails
+
+Run:
+
+```bash
+python -m src.main setup-schema
+```
+
+Then retry search.
+
+### No search results
+
+Run the pipeline in order:
+
+```bash
+python -m src.main scrape --max-pages 25
+python -m src.main ingest
+python -m src.main extract-topics
+python -m src.main embed
+```
+
+### SentenceTransformer model download is slow
+
+The first run downloads the model. For production, pre-warm the model cache or use a deployment image with the model already available.
+
+### OpenAI is not used
+
+By default the project runs offline with fallback extraction and local embeddings. To use OpenAI:
+
+```dotenv
+OPENAI_API_KEY=...
+TOPIC_LLM_PROVIDER=openai
+SYNTHESIS_PROVIDER=openai
+EMBEDDING_PROVIDER=openai
+```
+
+### Topic merging produced strange merges
+
+Automatic topic merging is powerful but should be reviewed. Use dry-run first:
+
+```bash
+python -m src.main merge-topics --dry-run
+```
+
+Only apply after inspecting candidate merges:
+
+```bash
+python -m src.main merge-topics --apply
+```
+
+---
+
+## 13. Known limitations
+
+- Public website selectors may change. The parser is defensive and includes TODO points for future selector updates.
+- PDF extraction works only for PDFs with a text layer. Scanned PDFs require OCR, which is intentionally excluded from this MVP.
+- Fallback topic extraction can create generic topic terms when LLM extraction is disabled. Stopword filtering and dry-run merge review reduce this risk.
+- Graph relationship extraction is heuristic and links AMENDS/REPEALS only when target documents are present in the graph.
+- CrossEncoder reranking improves precision but increases latency and model load time.
+- Louvain community detection requires Neo4j Graph Data Science plugin, not included in the default Neo4j Community Docker image.
+
+---
+
+## 14. Six-day implementation roadmap
+
+| Day | Deliverable |
+|---|---|
+| Day 1 | Repository skeleton, config, Docker Compose, CLI stubs, README draft |
+| Day 2 | Async scraper, parser, checkpoint manager, Markdown converter |
+| Day 3 | Pydantic models, Neo4j schema, graph ingestion |
+| Day 4 | LLM topic extraction, semantic chunking, embedding providers |
+| Day 5 | Hybrid search, CrossEncoder reranker, topic merging, community detection |
+| Day 6 | Final CLI integration, README, architecture report, sample data, final checklist |
+
+---
+
+## 15. Interview preparation answers
+
+### How does the scraper behave when throttling increases or CAPTCHAs appear?
+
+The scraper uses randomized user-agent headers, custom request headers, random throttling, retry with exponential backoff, timeout handling, and checkpoint/resume. If the website starts returning rate-limit or block responses, the crawler preserves progress and continues later. If a real CAPTCHA is served, the correct production behavior is not to bypass it; the pipeline should reduce rate, pause, or request authorized data access.
+
+### Why use GraphRAG instead of flat vector search?
+
+Legal documents contain explicit structure: document type, number, issuer, dates, amendments, repeals, topics, and multilingual versions. GraphRAG preserves those relationships and allows retrieval to combine semantic similarity with legal topology. This produces more explainable answers than flat chunk retrieval alone.
+
+### Why store languages as properties on one Document node?
+
+The legal identity is the document, not the translation. Storing `contentAr`, `contentEn`, and `contentFr` on one node avoids duplicate graph identities and keeps topics, chunks, amendments, and repeals attached to the same legal instrument.
+
+### Why merge topics at threshold 0.88?
+
+A high cosine threshold reduces false merges. Topic labels are short, so overly low thresholds can merge legally distinct concepts. `0.88` is a conservative default that should be validated against a labeled sample. Production usage should dry-run merge plans before applying.
+
+### Where are bottlenecks at 1,000,000 articles?
+
+The main bottlenecks are crawling throughput, PDF parsing, LLM topic extraction cost, embedding generation, Neo4j write throughput, vector index build time, and CrossEncoder latency. Scale by separating crawl/parse/embed/ingest queues, batching writes, caching embeddings, using worker pools, and limiting reranking to top candidates.
+
+### What are the latency trade-offs of CrossEncoder reranking?
+
+Bi-encoder vector search is fast because query and documents are embedded independently. CrossEncoders are more accurate because they jointly score query-candidate pairs, but they are slower. This project applies CrossEncoder reranking only after top-k candidate generation and keeps it optional.
+
+---
+
+## Development Notes
+
+This project was developed using AI-assisted engineering workflows for rapid prototyping and code generation.
+
+All architectural decisions, integration work, testing, debugging, and final validation were performed manually.
