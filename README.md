@@ -1,6 +1,6 @@
 # legal-graphrag-pipeline
 
-Production-oriented Legal GraphRAG pipeline for Oman legal documents from [qanoon.om](https://qanoon.om/).
+A prototype GraphRAG pipeline for legal document ingestion, Neo4j-based knowledge representation, embeddings, and hybrid retrieval for Oman legal documents from [qanoon.om](https://qanoon.om/). Built as a learning and portfolio project.
 
 The pipeline crawls public legal documents, converts HTML/PDF content to Markdown, stores consolidated multilingual legal documents in Neo4j, extracts topics, creates semantic chunks and embeddings, and exposes hybrid graph/vector search through a CLI.
 
